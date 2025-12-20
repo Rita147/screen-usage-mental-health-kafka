@@ -1,43 +1,101 @@
 import json
+import joblib
+import pandas as pd
 from kafka import KafkaConsumer
 from kafka.errors import NoBrokersAvailable
 
-# config
+# =======================
+# Kafka configuration
+# =======================
 KAFKA_TOPIC = "mental-health-stream"
 KAFKA_SERVER = "localhost:9092"
 
-def main():
-    print(f"Starting Consumer...")
-    print(f"Connecting to Kafka at {KAFKA_SERVER}...")
+# =======================
+# Model configuration
+# =======================
+MODEL_PATH = "models/mental_health_model.pkl"
+TARGET_COL = "mental_health_score"
 
+# Columns that were NOT used during training
+NON_FEATURE_COLS = [
+    "user_id",
+    "event_time"
+]
+
+# =======================
+# Anomaly detection
+# =======================
+ANOMALY_THRESHOLD = 1.5
+
+
+def main():
+    print("Starting Prediction Consumer...")
+    print("Loading trained model...")
+
+    # Load model once
+    model = joblib.load(MODEL_PATH)
+    print("Model loaded successfully.")
+
+    # Initialize Kafka consumer
     try:
-        # init consumer
         consumer = KafkaConsumer(
             KAFKA_TOPIC,
             bootstrap_servers=[KAFKA_SERVER],
-            auto_offset_reset='earliest',
+            auto_offset_reset="earliest",
             enable_auto_commit=True,
-            group_id='my-simple-consumer-group',
-            value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+            group_id="prediction-consumer-group",
+            value_deserializer=lambda x: json.loads(x.decode("utf-8"))
         )
-        print(f"Connected! Waiting for messages on topic: '{KAFKA_TOPIC}'")
     except NoBrokersAvailable:
-        print(f"Error: Could not connect to Kafka at {KAFKA_SERVER}.")
-        print("   Make sure Docker is running with: 'docker-compose up -d'")
+        print("Kafka broker not available. Is Docker running?")
         return
 
     try:
         for message in consumer:
             data = message.value
-            
-            user = data.get('user_id', 'Unknown')
-            time = data.get('event_time', 'Unknown')
-            print(f"Received: User {user} at {time}")
+
+            # Metadata
+            user_id = data.get("user_id", "unknown")
+            actual_score = data.get(TARGET_COL, None)
+
+            # Convert Kafka message to DataFrame
+            df = pd.DataFrame([data])
+
+            # Drop non-feature + target columns safely
+            df_model = df.drop(
+                columns=NON_FEATURE_COLS + [TARGET_COL],
+                errors="ignore"
+            )
+
+            # Predict
+            predicted_score = model.predict(df_model)[0]
+
+            # Output + anomaly detection
+            if actual_score is not None:
+                error = abs(predicted_score - actual_score)
+
+                alert = ""
+                if error > ANOMALY_THRESHOLD:
+                    alert = "  ANOMALY DETECTED"
+
+                print(
+                    f"User {user_id} | "
+                    f"Actual: {actual_score:.2f} | "
+                    f"Predicted: {predicted_score:.2f} | "
+                    f"Error: {error:.2f}"
+                    f"{alert}"
+                )
+            else:
+                print(
+                    f"User {user_id} | "
+                    f"Predicted: {predicted_score:.2f}"
+                )
 
     except KeyboardInterrupt:
-        print("\nStopping consumer...")
+        print("\nStopping prediction consumer...")
     finally:
         consumer.close()
+
 
 if __name__ == "__main__":
     main()

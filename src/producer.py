@@ -5,7 +5,7 @@ import json
 import time
 
 # stream data csv
-DATA_PATH = "../data/processed/screen_time_mental_health_stream.csv"
+DATA_PATH = "data/processed/streaming_test_data_stream.csv"
 
 KAFKA_SERVER = "localhost:9092"
 KAFKA_TOPIC = "mental-health-stream"
