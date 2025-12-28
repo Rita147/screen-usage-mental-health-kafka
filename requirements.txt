@@ -5,3 +5,4 @@ seaborn
 plotly
 kafka-python
 scikit-learn
+streamlit
